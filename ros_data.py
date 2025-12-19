@@ -45,7 +45,7 @@ class ros_data_t:
             return
         
         try:
-            # GPS / position messages: prefer "ts" then "timestamp"
+            # GPS / position messages: prefer "ts" then "timestamp
             if "gps" in msg:
                 self.g_timestamp = data.get("ts", data.get("timestamp"))
                 self.g_latitude = data.get("latitude")
