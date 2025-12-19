@@ -86,7 +86,6 @@ class robot_data_01_model(BaseModel):
     canopy_temperature_data: List[float]
     ndvi_data: List[float]
     ndvi_3d_data: List[float]
-
     ndvi_ir_data: Optional[List[float]] = None
     ndvi_visible_data: Optional[List[float]] = None
 

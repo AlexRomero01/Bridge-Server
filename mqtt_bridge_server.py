@@ -58,19 +58,22 @@ class mqtt_data_uploader_t(Node):
 
         self.ros_data = ros_data_t()
         self.mqtt_client_server = mqtt.Client()
+        # timestamp of last received MQTT message (seconds since epoch)
+        self.last_msg_time = 0
 
         try:
             # ---------------------- MONGO CONNECTION ----------------------
             self.get_logger().info("Trying to connect to MongoDB [...]")
 
             # Prefer MONGO_URI env var, otherwise use the requested DB URI
-            mongo_uri = os.getenv("MONGO_URI", "mongodb://admin:cdei2025@147.83.52.40:27017/")
+            mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
             # Create client (no ServerApi enforced to avoid compatibility issues)
             self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=10000)
             # Test connection
             self.client.admin.command('ping')
             self.get_logger().info(f"Connected to MongoDB at {mongo_uri}")
             # Access the target database and collection
+            # use the same collection as before ("Test") to keep historic format
             self.mongo_db_collection = self.client["ROS2"]["Carlos Test"]
             # --------------------------------------------------------------
 
@@ -108,11 +111,10 @@ class mqtt_data_uploader_t(Node):
             payload = json.loads(msg.payload.decode("utf-8"))
             print(f"[DEBUG] MQTT Received raw: {payload}")
 
+            # mark last message time so publisher knows new data arrived
+            self.last_msg_time = time.time()
             self.ros_data._is_data_available = True
             self.ros_data.update(payload)
-
-            # debug ambient after update
-            print(f"[DEBUG] ambient after update: {self.ros_data.n_ambient_temperature}")
 
         except Exception as e:
             self.get_logger().error(f"Error processing MQTT message: {e}")
@@ -180,9 +182,10 @@ class mqtt_data_uploader_t(Node):
             utm_baselink_Z_samples = []
 
             start_time = time.time()
-
+ 
             while (time.time() - start_time) <= sampling_duration_sec:
-                manage_data(rd_handler.t_canopy_temperature, canopy_temperature_samples)
+                # append the whole plants list as one sample so canopy_temperature_data becomes [[{...}, {...}], ...]
+                manage_data(rd_handler.t_plants, canopy_temperature_samples)
                 manage_data(rd_handler.n_ndvi, ndvi_samples)
                 manage_data(rd_handler.n_ndvi_3d, ndvi_3d_samples)
                 manage_data(rd_handler.n_ir, ndvi_ir_samples)
@@ -202,6 +205,7 @@ class mqtt_data_uploader_t(Node):
 
             # JSON structure to store
             json_data = {
+                # prefer gps timestamp (g_timestamp) else try recent ts values stored elsewhere
                 "timestamp": rd_handler.g_timestamp,
                 "latitude": rd_handler.g_latitude,
                 "longitude": rd_handler.g_longitude,
@@ -210,8 +214,7 @@ class mqtt_data_uploader_t(Node):
                 "service": rd_handler.g_service,
 
                 "canopy_temperature_data": canopy_temperature_samples,
-                "t_cswi": rd_handler.t_cswi,        
-                "t_entity_count": rd_handler.t_entity_count, 
+                "t_entity_count": rd_handler.t_entity_count,
                 "ndvi_data": ndvi_samples,
                 "ndvi_3d_data": ndvi_3d_samples,
                 "ndvi_ir_data": ndvi_ir_samples,
@@ -241,9 +244,14 @@ class mqtt_data_uploader_t(Node):
                 relative_humidity_samples, absolute_humidity_samples, dew_point_samples,
                 utm_baselink_X_samples, utm_baselink_Y_samples, utm_baselink_Z_samples
             ]
-            if any(samples for samples in all_samples):
+            # Publish only if at least one message arrived during the sampling window
+            # (prevents re-publishing the last-known values when sender stopped)
+            if self.last_msg_time >= start_time and any(samples for samples in all_samples):
                 # Publish to both MQTT and MongoDB
                 self.publish(JSON_GLOBAL_TOPIC, json_data)
+            else:
+                # no new messages in this sampling window -> skip publishing
+                self.get_logger().debug("No new MQTT data in sampling window; skipping publish.")
 
 
 def main(args=None):
