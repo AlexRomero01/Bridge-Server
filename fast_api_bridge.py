@@ -1,4 +1,3 @@
-
 import io
 import json
 import re
@@ -90,7 +89,7 @@ class robot_data_01_model(BaseModel):
     ndvi_visible_data: Optional[List[float]] = None
 
     area_segmentation_data: Optional[List[float]] = None
-    location_data: Optional[List[str]] = None
+    location_data: Optional[List[Dict[str, Any]]] = None
     biomass_data: Optional[List[float]] = None
 
     crop_light_state_data: Optional[List[str]] = None
@@ -106,7 +105,7 @@ class robot_data_01_model(BaseModel):
     sensor_orientation: Optional[float] = None
     robot_status: Optional[float] = None
 
-# Ultra sanitized data because Influx sucks
+
 def get_influx_data():
     
     flux_query = f'''

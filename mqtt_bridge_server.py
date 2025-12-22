@@ -184,8 +184,36 @@ class mqtt_data_uploader_t(Node):
             start_time = time.time()
  
             while (time.time() - start_time) <= sampling_duration_sec:
-                # append the whole plants list as one sample so canopy_temperature_data becomes [[{...}, {...}], ...]
-                manage_data(rd_handler.t_plants, canopy_temperature_samples)
+                # Flatten plant lists into a single array of objects (deduplicate/update by 'id')
+                if rd_handler.t_plants and isinstance(rd_handler.t_plants, list):
+                    # collect existing ids to avoid duplicates
+                    existing_ids = {p.get('id') for p in canopy_temperature_samples if isinstance(p, dict) and p.get('id') is not None}
+                    for plant in rd_handler.t_plants:
+                        if plant is None:
+                            continue
+                        if isinstance(plant, dict):
+                            pid = plant.get('id')
+                            if pid is not None:
+                                if pid in existing_ids:
+                                    # update existing entry with latest fields
+                                    for ex in canopy_temperature_samples:
+                                        if isinstance(ex, dict) and ex.get('id') == pid:
+                                            ex.update(plant)
+                                            break
+                                else:
+                                    canopy_temperature_samples.append(plant.copy())
+                                    existing_ids.add(pid)
+                            else:
+                                # no id: append if not already present
+                                if plant not in canopy_temperature_samples:
+                                    canopy_temperature_samples.append(plant.copy())
+                        else:
+                            # non-dict plant entry: keep uniqueness
+                            if plant not in canopy_temperature_samples:
+                                canopy_temperature_samples.append(plant)
+                else:
+                    # fallback for older flat-format messages (single float)
+                    manage_data(rd_handler.t_canopy_temperature, canopy_temperature_samples)
                 manage_data(rd_handler.n_ndvi, ndvi_samples)
                 manage_data(rd_handler.n_ndvi_3d, ndvi_3d_samples)
                 manage_data(rd_handler.n_ir, ndvi_ir_samples)
@@ -205,7 +233,6 @@ class mqtt_data_uploader_t(Node):
 
             # JSON structure to store
             json_data = {
-                # prefer gps timestamp (g_timestamp) else try recent ts values stored elsewhere
                 "timestamp": rd_handler.g_timestamp,
                 "latitude": rd_handler.g_latitude,
                 "longitude": rd_handler.g_longitude,

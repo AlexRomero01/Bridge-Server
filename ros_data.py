@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-    
+import re
+from typing import Optional, Dict, Any
+
 # A helper class to store and update data from ROS messages.
 
 @dataclass
@@ -23,7 +25,8 @@ class ros_data_t:
     n_ir: float = None
     n_visible: float = None
     n_area: float = None
-    n_location: str = None
+    # now we store structured location data (dict with keys section,row,position_from_N,direction)
+    n_location: Optional[Dict[str, Any]] = None
     n_biomass: float = None
     n_crop_light_state: str = None
     n_crop_type: str = None
@@ -69,7 +72,28 @@ class ros_data_t:
                 self.n_area = data.get("area")
 
             elif "location" in msg:
-                self.n_location = data.get("location")
+                # Accept either already-structured dict or a single location string
+                loc = data.get("location")
+                if isinstance(loc, dict):
+                    # try to normalize/ensure keys
+                    parsed = {
+                        "section": loc.get("section"),
+                        "row": loc.get("row"),
+                        "position_from_N": None,
+                        "direction": loc.get("direction")
+                    }
+                    # try to parse position if present as string
+                    pos = loc.get("position_from_N") or loc.get("position") or loc.get("position_from_n")
+                    if pos is not None:
+                        try:
+                            parsed['position_from_N'] = float(re.search(r'([-+]?[0-9]*\.?[0-9]+)', str(pos)).group(1))
+                        except Exception:
+                            parsed['position_from_N'] = None
+                    self.n_location = parsed
+                elif isinstance(loc, str):
+                    self.n_location = _parse_location_string(loc)
+                else:
+                    self.n_location = None
 
             elif "biomass" in msg:
                 self.n_biomass = data.get("biomass")
@@ -138,3 +162,77 @@ class ros_data_t:
         
     def is_data_available(self) -> bool:
         return self._is_data_available
+
+def _parse_location_string(s: str) -> Dict[str, Any]:
+    """
+    Parse a location string like:
+      'section: open air, row: row1-2, position_from_N: 11.64 m, direction: North → South'
+    into a dict:
+      { "section": "...", "row": "...", "position_from_N": 11.64, "direction": "South → North" }
+    """
+    out: Dict[str, Any] = {
+        "section": None,
+        "row": None,
+        "position_from_N": None,
+        "direction": None
+    }
+
+    if not s or not isinstance(s, str):
+        return out
+
+    # split by commas, then extract key:value pairs
+    parts = [p.strip() for p in re.split(r',\s*', s) if p.strip()]
+    for p in parts:
+        if ':' in p:
+            k, v = [x.strip() for x in p.split(':', 1)]
+            kl = k.lower()
+            if 'section' in kl:
+                val = v.strip()
+                # normalize "open air" to example format
+                if 'open air' in val.lower():
+                    out['section'] = "section 3 (Open air)"
+                else:
+                    out['section'] = val.title()
+            elif 'row' in kl:
+                rv = v.strip().lower()
+                # keep row token, remove spaces
+                # if pattern rowNN-NN, try to sanitize by removing spaces
+                m = re.search(r'(\d+)(?:\s*-\s*(\d+))?', rv)
+                if m:
+                    if m.group(2):
+                        # combine numbers (e.g. "1-2" -> "1-2") keep dash, or join? keep original compact
+                        out['row'] = f"row{m.group(1)}-{m.group(2)}"
+                    else:
+                        out['row'] = f"row{m.group(1)}"
+                else:
+                    out['row'] = rv
+            elif 'position' in kl or 'position_from_n' in kl:
+                # extract float (meters)
+                m = re.search(r'([-+]?[0-9]*\.?[0-9]+)', v)
+                if m:
+                    try:
+                        out['position_from_N'] = float(m.group(1))
+                    except Exception:
+                        out['position_from_N'] = None
+                else:
+                    out['position_from_N'] = None
+            elif 'direction' in kl:
+                dv = v.replace('->', '→').replace('to', '→').strip()
+                # Normalize order: prefer "South → North" if both present
+                low = dv.lower()
+                if 'north' in low and 'south' in low:
+                    out['direction'] = "South → North"
+                else:
+                    out['direction'] = dv
+            else:
+                # unknown key: store raw
+                out[k] = v
+        else:
+            # no colon: try to detect direction token or single value
+            low = p.lower()
+            if 'north' in low or 'south' in low:
+                if 'north' in low and 'south' in low:
+                    out['direction'] = "South → North"
+                else:
+                    out['direction'] = p
+    return out
