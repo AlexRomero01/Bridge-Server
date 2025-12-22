@@ -66,7 +66,8 @@ class mqtt_data_uploader_t(Node):
             self.get_logger().info("Trying to connect to MongoDB [...]")
 
             # Prefer MONGO_URI env var, otherwise use the requested DB URI
-            mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+            # default to the provided remote MongoDB with credentials
+            mongo_uri = os.getenv("MONGO_URI", "mongodb://admin:cdei2025@147.83.52.40:27017/")
             # Create client (no ServerApi enforced to avoid compatibility issues)
             self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=10000)
             # Test connection
