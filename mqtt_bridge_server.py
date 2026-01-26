@@ -75,7 +75,7 @@ class mqtt_data_uploader_t(Node):
             self.get_logger().info(f"Connected to MongoDB at {mongo_uri}")
             # Access the target database and collection
             # use the same collection as before ("Test") to keep historic format
-            self.mongo_db_collection = self.client["ROS2"]["Carlos Test"]
+            self.mongo_db_collection = self.client["ROS2"]["Alex Test"]
             # --------------------------------------------------------------
 
             # ---------------------- MQTT CONNECTION ----------------------
@@ -161,7 +161,7 @@ class mqtt_data_uploader_t(Node):
             if sample not in samples:
                 samples.append(sample)
 
-        sampling_duration_sec = 1  # seconds per batch
+        sampling_duration_sec = 0.5  # seconds per batch
 
         while True:
             canopy_temperature_samples = []

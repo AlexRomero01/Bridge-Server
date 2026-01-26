@@ -25,7 +25,6 @@ class ros_data_t:
     n_ir: float = None
     n_visible: float = None
     n_area: float = None
-    # now we store structured location data (dict with keys section,row,position_from_N,direction)
     n_location: Optional[Dict[str, Any]] = None
     n_biomass: float = None
     n_crop_light_state: str = None
@@ -109,12 +108,21 @@ class ros_data_t:
             elif "temperature" in msg:
                 plants = data.get("plants")
                 if plants and isinstance(plants, list):
-                    self.t_plants = plants  # store entire list of dicts [{id, canopy_temperature, cwsi}, ...]
+                    processed_plants = []
+                    for p in plants:
+                        if isinstance(p, str):
+                            parsed = _parse_plant_string(p)
+                            if parsed:
+                                processed_plants.append(parsed)
+                        elif isinstance(p, dict):
+                            processed_plants.append(p)
+
+                    self.t_plants = processed_plants
                     # entity count fallback
-                    self.t_entity_count = data.get("entity_count", len(plants))
+                    self.t_entity_count = data.get("entity_count", len(self.t_plants))
                     # keep an average for backward compatibility (optional)
                     try:
-                        temps = [float(p.get("canopy_temperature")) for p in plants if p.get("canopy_temperature") is not None]
+                        temps = [float(p.get("canopy_temperature")) for p in self.t_plants if p.get("canopy_temperature") is not None]
                         self.t_canopy_temperature = sum(temps) / len(temps) if temps else None
                     except Exception:
                         self.t_canopy_temperature = None
@@ -162,6 +170,44 @@ class ros_data_t:
         
     def is_data_available(self) -> bool:
         return self._is_data_available
+
+def _parse_plant_string(s: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse a plant data string like:
+      'Objeto 8: Temperatura = 21.54 °C, CSWI = -0.09', Area = 21.33'
+    into a dict:
+      { "id": 8, "canopy_temperature": 21.54, "cswi": -0.09, "area": 21.33 }
+    """
+    # Regex to find all key-value pairs
+    pairs = re.findall(r'([a-zA-Z\s]+)\s*=\s*([-\d.]+)', s)
+    
+    # Regex to find the object ID specifically
+    obj_id_match = re.search(r'Objeto\s+(\d+)', s)
+    
+    if not obj_id_match:
+        return None
+
+    plant_data = {'id': int(obj_id_match.group(1))}
+    
+    # Process all found key-value pairs
+    for key, value in pairs:
+        key = key.strip().lower()
+        try:
+            val = float(value)
+            if 'temperatura' in key:
+                plant_data['canopy_temperature'] = val
+            elif 'cswi' in key:
+                plant_data['cswi'] = val
+            elif 'area' in key:
+                plant_data['area'] = val
+        except ValueError:
+            continue  # Ignore if value is not a valid float
+            
+    # Check if essential keys are present
+    if 'canopy_temperature' not in plant_data or 'cswi' not in plant_data:
+        return None
+        
+    return plant_data
 
 def _parse_location_string(s: str) -> Dict[str, Any]:
     """
